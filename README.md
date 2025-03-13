@@ -7,12 +7,42 @@ using DICOM web service as communication interface.
 
 ## Quick Start
 
+### PACS & Viewer
+
 Simply execute the ``docker-compose.yml``:
 ```
 docker compose build
 docker compose run -d
 ```
 ``-d`` runs the services in *detached* mode in background. 
+
+### Dicomizer
+
+To add new WSI to the Orthanc database and also convert from vendor-specific formats to DICOM, Orthanc offers a command line tool: **OrthancWSIDicomizer**
+For scalability, it can be executed as docker microservice. Therefore, the Orthanc docker image has to be extended by the *OpenSlide* library and its dependencies provided in the Orthanc ``Dockerfile``. 
+
+Simply run:
+```
+docker build -t custom-orthanc-plugins:latest orthanc
+```
+
+After that, the Dicomier can be executed in its own microservice using paths to:
+1. Path to WSI file (e.g. ``NDPI``, ``SVS``)
+2. Path to WSI metainformation as ``JSON``
+See [Orthanc documentation](https://orthanc.uclouvain.be/book/plugins/wsi.html#command-line-tools) for further information.
+
+```
+sudo docker run -t -i --rm \
+  --network slim-orthanc_default \
+  --link=slim-orthanc-orthanc-1:orthanc \
+  --entrypoint=OrthancWSIDicomizer \
+  -v <path/to/wsi.wsi-ending>:/tmp/source.<wsi-ending>:ro \
+  -v <path/to/dataset.json>:/tmp/dataset.json:ro \
+  custom-orthanc-plugins:latest \
+  --username=orthanc --password=orthanc --orthanc=http://orthanc:8042/ \
+  --openslide=/lib/x86_64-linux-gnu/libopenslide.so.0 \
+  --dataset=/tmp/dataset.json /tmp/source.<wsi-ending>
+```
 
 ## Database
 
