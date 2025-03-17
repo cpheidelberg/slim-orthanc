@@ -41,12 +41,23 @@ sudo docker run -t -i --rm \
   custom-orthanc-plugins:latest \
   --username=orthanc --password=orthanc --orthanc=http://orthanc:8042/ \
   --openslide=/lib/x86_64-linux-gnu/libopenslide.so.0 \
-  --dataset=/tmp/dataset.json /tmp/source.<wsi-ending>
+  --dataset=/tmp/dataset.json \
+  --force-openslide 1 /tmp/source.<wsi-ending>
 ```
 
 ## Database
 
-A DICOM database is attached as docker volume in ``docker-compose.yml``
+A DICOM SQL database is attached as docker volume.
+Currently, a local folder is included by a given path which can be changed in ``docker-compose.yml``:
+
+```
+volumes:
+  orthanc-storage:
+    driver: local
+    driver_opts:
+      type: none
+      device: /var/lib/orthanc/db-v6  # <-- change path to SQL DB
+```
 
 ## Update SLIM
 
