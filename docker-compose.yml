@@ -3,7 +3,8 @@ volumes:
     driver: local
     driver_opts:
       type: none
-      device: /var/lib/orthanc/db-v6 # D:/orthanc-storage
+      device: ./OrthancStorage # D:/orthanc-storage
+      # device: /var/lib/orthanc/db-v6 # D:/orthanc-storage
       o: bind
 
 services:
