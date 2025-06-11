@@ -1,0 +1,3 @@
+[submodule "slim"]
+	path = slim
+	url = https://github.com/ImagingDataCommons/slim.git
