@@ -20,6 +20,10 @@ from highdicom.sr import (
 )
 from dicomweb_client.api import DICOMwebClient
 
+from wsidicom import WsiDicom, WsiDicomWebClient
+import cv2
+from matplotlib import pyplot as plt
+
 
 class DicomSR:
     """Create a DICOM SR file with annotations from a WSI DICOM image."""
@@ -36,7 +40,6 @@ class DicomSR:
 
         print(f"Height: {self.dicomFile.ImagedVolumeHeight}")
         print(f"Width: {self.dicomFile.ImagedVolumeWidth}")
-        print(f"Depth: {self.dicomFile.ImagedVolumeDepth}")
 
         self.prediction = prediction
         self.polylines = polylines
@@ -118,7 +121,6 @@ class DicomSR:
         )
         library_item.ContentSequence = []
 
-        # iterate over all instance UIDs
         library_item.ContentSequence.append(self.get_library_item())
 
         return library_item
@@ -165,6 +167,7 @@ class DicomSR:
             relationship_type=RelationshipTypeValues.CONTAINS,
         )
 
+        corrected_polyline = self.correct_polyline(polyline)
         scoord_item = Scoord3DContentItem(
             name=CodedConcept(value='111030', 
                                 scheme_designator='DCM',
@@ -175,8 +178,14 @@ class DicomSR:
             relationship_type=RelationshipTypeValues.CONTAINS,
         )
         
-
         return text_item, uid_item, code_item, code2_item, scoord_item
+    
+
+    def correct_polyline(self, polyline):
+        """Correct polyline coordinates to match DICOM WSI coordinate system."""
+        print(f"Polyline range: {np.min(polyline)}, {np.max(polyline)}")
+
+        # TODO: Normalize the polyline coordinates and match to the DICOM WSI coordinate system
 
 
     def get_finding_container(self):
@@ -372,39 +381,61 @@ class DicomSR:
         return self.sr
 
 
+def analyze_wsi(slide: WsiDicom) -> tuple[np.array, float]:
+    """Analyze WSI DICOM image to find contours of tissue regions."""
+    region = slide.read_region(location=(0, 0), level=5, size=(1736,1272))
+    print(f"Region size: {region.size}, mode: {region}, dtype: {type(region)}")
+                    
+    image_np = np.asarray(region)
+    gray = cv2.cvtColor(image_np, cv2.COLOR_RGB2GRAY)
+    
+    _, mask = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
+    contours, _ = cv2.findContours(~mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    contour_image = image_np.copy()
+    cv2.drawContours(contour_image, contours, -1, (255, 0, 0), 5)
+
+    corners = []
+    total_area = image_np.shape[0] * image_np.shape[1]
+    tissue_area = 0
+    for contour in contours:
+        contour_3d = np.hstack((contour.squeeze(1), np.zeros((contour.shape[0], 1), dtype=contour.dtype)))
+        corners.append(contour_3d)
+        tissue_area += cv2.contourArea(contour)
+    
+    tissue_fraction = tissue_area / total_area if total_area > 0 else 0
+    print(f"Anteil eingeschlossenes Gewebe: {tissue_fraction:.2%}")
+
+    return corners, tissue_fraction
+
+
 if __name__ == "__main__":
-    # Pfad zum DICOM-Bild
-    inPath = "original.dcm"
-    outPath = "structured_report.dcm"
 
-    # TODO: Download WSI via DICOM web, currently work on local file
-
-    prediction = 5
-    polylines = np.array([
-            [5.0, 5.0, 0], 
-            [5.0, 10.7, 0], 
-            [20.5, 10.8, 0], 
-            [20.3, 5.6, 0],
-            [5.0, 5.0, 0], 
-    ]),
-
-    dicomSR = DicomSR(dicomPath=inPath, prediction=prediction, polylines=polylines)
-    sr_file = dicomSR.create_file()
-
-    sr_file.save_as(outPath)
-    print(f"SR-Dokument wurde als {outPath} gespeichert.")
-
-    # -----------------------------------------------------------------------------
-    # Upload the annotation using dicomweb_client
-    # -----------------------------------------------------------------------------
     dicomweb_url = "http://localhost:8042/dicom-web"
     client = DICOMwebClient(dicomweb_url)
+    instance = client.retrieve_instance(
+        study_instance_uid="1.2.276.0.7230010.3.1.2.380371968.1.1750752870.653787",
+        series_instance_uid="1.2.276.0.7230010.3.1.3.380371968.1.1750752870.653788",
+        sop_instance_uid="1.2.276.0.7230010.3.1.4.380371968.1.1750752873.653799",
+        media_types=(('application/dicom', '1.2.840.10008.1.2.4.90', ), )
+    )
+
+    client_wsi = WsiDicomWebClient.create_client(dicomweb_url)
+    slide = WsiDicom.open_web(
+        client=client_wsi, 
+        study_uid="1.2.276.0.7230010.3.1.2.380371968.1.1750752870.653787",
+        series_uids="1.2.276.0.7230010.3.1.3.380371968.1.1750752870.653788",
+    )
+    print(slide)
+    print(slide.read_tile(5, (1,1)))
+    polylines, tissue_ratio = analyze_wsi(slide)
+
+    dicomSR = DicomSR(dicomFile=instance, prediction=tissue_ratio, polylines=polylines)
+    sr_file = dicomSR.create_file()
+
     client.store_instances([sr_file])
 
     print("Annotation SR file created and uploaded successfully.")
 
-    # sr_dataset.save_as("structured_report.dcm")
-    # print(f"SR-Dokument wurde als 'structured_report.dcm' gespeichert.")
-
-
-
+    sr_file.save_as("structured_report.dcm")
+    print(f"SR-Dokument wurde als 'structured_report.dcm' gespeichert.")
