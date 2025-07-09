@@ -1,0 +1,79 @@
+volumes:
+  db_data: {}
+  arc_data: {}
+  ldap_data: {}
+  ldap_config: {}
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: app
+    ports:
+      - "8008:8008"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    user: nginx
+    depends_on:
+      - arc
+
+  ldap:
+    image: dcm4che/slapd-dcm4chee:2.6.0-26.0
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+    expose:
+      - 389
+    env_file: docker-compose.env
+    volumes:
+      - ldap_data:/var/lib/openldap/openldap-data
+      - ldap_config:/etc/openldap/slapd.d
+      - ./etc/openldap/data/modify-dcmRemapRetrieveURL.ldif:/etc/openldap/data/modify-dcmRemapRetrieveURL.ldif:ro
+      - ./etc/openldap/data/modify-dcmWebServicePath.ldif:/etc/openldap/data/modify-dcmWebServicePath.ldif:ro
+
+  db:
+    image: dcm4che/postgres-dcm4chee:14.2-26
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+    expose:
+      - 5432
+    env_file: docker-compose.env
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+  arc:
+    image: dcm4che/dcm4chee-arc-psql:5.26.0
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+    expose:
+      - 8080
+      - 8443
+      - 9990
+      - 9993
+      - 11112
+      - 2762
+      - 2575
+      - 12575
+    env_file: docker-compose.env
+    environment:
+      # Used to set the initial and maximal Java heap size to avoid 
+      # problems retrieving large WSI bulk data annotations.
+      #
+      # The default is "-Xms64m -Xmx512m -XX:MetaspaceSize=96M -XX:MaxMetaspaceSize=256m"
+      # Reference: https://github.com/dcm4che-dockerfiles/dcm4chee-arc-psql
+      JBOSS_JAVA_SIZING: "-Xms64m -Xmx4096m -XX:MetaspaceSize=96M -XX:MaxMetaspaceSize=4096m"
+      WILDFLY_CHOWN: /opt/wildfly/standalone /storage
+      WILDFLY_WAIT_FOR: ldap:389 db:5432
+      HTTP_PROXY_ADDRESS_FORWARDING: "true"
+      ARCHIVE_HOST: localhost
+    depends_on:
+      - ldap
+      - db
+    volumes:
+      - arc_data:/storage
